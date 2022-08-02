@@ -22,7 +22,7 @@ def escape(string):
     return json.dumps(string).replace(r'$', r'\$')
 
 def comment(string):
-    return '\n'.join(['# ' + line for line in string.split('\n')])
+    return '\n'.join([f'# {line}' for line in string.split('\n')])
 
 def gen_script():
     divider = '-__-__-__bass___-env-output-__bass_-__-__-__-__'
@@ -34,12 +34,8 @@ def gen_script():
     output = subprocess.check_output(args, universal_newlines=True)
     old_env = output.strip()
 
-    command = '{}\n(echo "{}"; {}; echo "{}"; alias)'.format(
-        ' '.join(sys.argv[1:]).rstrip().rstrip(';'),
-        divider,
-        env_reader,
-        divider,
-    )
+    command = f"""{' '.join(sys.argv[1:]).rstrip().rstrip(';')}\n(echo "{divider}"; {env_reader}; echo "{divider}"; alias)"""
+
     args = [BASH, '-c', command]
     output = subprocess.check_output(args, universal_newlines=True)
     stdout, new_env, alias = output.split(divider, 2)
@@ -48,22 +44,22 @@ def gen_script():
     old_env = json.loads(old_env)
     new_env = json.loads(new_env)
 
-    script_lines = []
+    script_lines = [
+        "printf %s;printf '\\n'" % escape(line) for line in stdout.splitlines()
+    ]
 
-    for line in stdout.splitlines():
-        # some outputs might use documentation about the shell usage with dollar signs
-        script_lines.append("printf %s;printf '\\n'" % escape(line))
+
     for k, v in new_env.items():
         if k in ['PS1', 'SHLVL', 'XPC_SERVICE_NAME'] or k.startswith("BASH_FUNC"):
             continue
         v1 = old_env.get(k)
         if not v1:
-            script_lines.append(comment('adding %s=%s' % (k, v)))
+            script_lines.append(comment(f'adding {k}={v}'))
         elif v1 != v:
-            script_lines.append(comment('updating %s=%s -> %s' % (k, v1, v)))
+            script_lines.append(comment(f'updating {k}={v1} -> {v}'))
             # process special variables
             if k == 'PWD':
-                script_lines.append('cd %s' % escape(v))
+                script_lines.append(f'cd {escape(v)}')
                 continue
         else:
             continue
@@ -72,12 +68,10 @@ def gen_script():
                               for directory in v.split(':')])
         else:
             value = escape(v)
-        script_lines.append('set -g -x %s %s' % (k, value))
+        script_lines.append(f'set -g -x {k} {value}')
 
     for var in set(old_env.keys()) - set(new_env.keys()):
-        script_lines.append(comment('removing %s' % var))
-        script_lines.append('set -e %s' % var)
-
+        script_lines.extend((comment(f'removing {var}'), f'set -e {var}'))
     script = '\n'.join(script_lines)
 
     return script + '\n' + alias
@@ -92,7 +86,7 @@ except subprocess.CalledProcessError as e:
     print('exit code:', e.returncode, file=sys.stderr)
     print('__error', e.returncode, end='')
 except Exception as e:
-    print('unknown error:', str(e), file=sys.stderr)
+    print('unknown error:', e, file=sys.stderr)
     traceback.print_exc(10, file=sys.stderr)
     print('__error', end='')
 else:
